@@ -9,25 +9,27 @@ if (!isset($_SESSION["user_id"])) {
 
 $userID = $_SESSION["user_id"];
 
-// Find customer
+// Find logged-in provider
 $stmt = $conn->prepare(
-    "SELECT CustomerID FROM Customers WHERE UserID = ?"
+    "SELECT ProviderID FROM Providers WHERE UserID = ?"
 );
+
 $stmt->bind_param("i", $userID);
 $stmt->execute();
 
 $result = $stmt->get_result();
 
 if ($result->num_rows === 0) {
-    die("Customer profile not found.");
+    die("Provider profile not found.");
 }
 
-$customer = $result->fetch_assoc();
-$customerID = $customer["CustomerID"];
+$provider = $result->fetch_assoc();
+$providerID = $provider["ProviderID"];
+
 $stmt->close();
 
 
-// Get customer's quotes
+// Get quote requests for this provider
 $stmt = $conn->prepare(
     "SELECT
         Quotes.QuoteID,
@@ -36,15 +38,18 @@ $stmt = $conn->prepare(
         Quotes.ProviderMessage,
         Quotes.Status,
         Quotes.CreatedAt,
-        Providers.BusinessName
+        Users.FirstName,
+        Users.LastName
     FROM Quotes
-    JOIN Providers
-        ON Quotes.ProviderID = Providers.ProviderID
-    WHERE Quotes.CustomerID = ?
+    JOIN Customers
+        ON Quotes.CustomerID = Customers.CustomerID
+    JOIN Users
+        ON Customers.UserID = Users.UserID
+    WHERE Quotes.ProviderID = ?
     ORDER BY Quotes.CreatedAt DESC"
 );
 
-$stmt->bind_param("i", $customerID);
+$stmt->bind_param("i", $providerID);
 $stmt->execute();
 
 $quotes = $stmt->get_result();
@@ -72,11 +77,11 @@ $quotes = $stmt->get_result();
     <div class="container">
 
         <a class="navbar-brand fw-bold"
-           href="customer_dashboard.php">
-            LocalLink
+           href="provider_dashboard.php">
+            LocalLink Provider
         </a>
 
-        <a href="customer_dashboard.php"
+        <a href="provider_dashboard.php"
            class="btn btn-light">
             Dashboard
         </a>
@@ -87,7 +92,7 @@ $quotes = $stmt->get_result();
 
 <div class="container py-5">
 
-    <h1 class="mb-4">My Quotes</h1>
+    <h1 class="mb-4">Quote Requests</h1>
 
 
     <?php if ($quotes->num_rows > 0): ?>
@@ -98,13 +103,20 @@ $quotes = $stmt->get_result();
 
                 <div class="card-body">
 
-                    <h4>
-                        <?php echo htmlspecialchars($quote["BusinessName"]); ?>
-                    </h4>
+                    <h5>
+                        Customer:
+                        <?php
+                        echo htmlspecialchars(
+                            $quote["FirstName"] . " " .
+                            $quote["LastName"]
+                        );
+                        ?>
+                    </h5>
 
 
                     <p>
-                        <strong>Your Request:</strong><br>
+                        <strong>Job Description:</strong>
+                        <br>
 
                         <?php
                         echo nl2br(
@@ -117,14 +129,72 @@ $quotes = $stmt->get_result();
                     <p>
                         <strong>Status:</strong>
 
-                        <?php echo htmlspecialchars($quote["Status"]); ?>
+                        <span class="badge bg-secondary">
+                            <?php
+                            echo htmlspecialchars($quote["Status"]);
+                            ?>
+                        </span>
                     </p>
 
 
-                   <?php if (!empty($quote["Price"]) && $quote["Status"] !== "Accepted" && $quote["Status"] !== "Declined"): ?>
+                    <?php if ($quote["Status"] === "Pending"): ?>
+
+                        <form
+                            method="POST"
+                            action="respond_quote.php">
+
+                            <input
+                                type="hidden"
+                                name="quote_id"
+                                value="<?php echo $quote["QuoteID"]; ?>">
+
+
+                            <div class="mb-3">
+
+                                <label class="form-label">
+                                    Quote Price (R)
+                                </label>
+
+                                <input
+                                    type="number"
+                                    name="price"
+                                    class="form-control"
+                                    step="0.01"
+                                    min="0.01"
+                                    required>
+
+                            </div>
+
+
+                            <div class="mb-3">
+
+                                <label class="form-label">
+                                    Message to Customer
+                                </label>
+
+                                <textarea
+                                    name="provider_message"
+                                    class="form-control"
+                                    rows="3"
+                                    placeholder="Example: This price includes labour and materials."
+                                    required></textarea>
+
+                            </div>
+
+
+                            <button
+                                type="submit"
+                                class="btn btn-success">
+                                Send Quote
+                            </button>
+
+                        </form>
+
+
+                    <?php else: ?>
 
                         <p>
-                            <strong>Quoted Price:</strong>
+                            <strong>Price:</strong>
 
                             R<?php
                             echo number_format(
@@ -136,7 +206,8 @@ $quotes = $stmt->get_result();
 
 
                         <p>
-                            <strong>Provider Message:</strong><br>
+                            <strong>Your Message:</strong>
+                            <br>
 
                             <?php
                             echo htmlspecialchars(
@@ -144,61 +215,6 @@ $quotes = $stmt->get_result();
                             );
                             ?>
                         </p>
-
-
-                        <form
-                            method="POST"
-                            action="update_quote.php"
-                            class="d-inline">
-
-                            <input
-                                type="hidden"
-                                name="quote_id"
-                                value="<?php echo $quote["QuoteID"]; ?>">
-
-                            <input
-                                type="hidden"
-                                name="action"
-                                value="Accepted">
-
-                            <button
-                                type="submit"
-                                class="btn btn-success">
-                                Accept Quote
-                            </button>
-
-                        </form>
-
-
-                        <form method="POST" action="update_quote.php" class="d-inline">
-
-    <input
-        type="hidden"
-        name="quote_id"
-        value="<?php echo $quote["QuoteID"]; ?>">
-
-    <input
-        type="hidden"
-        name="action"
-        value="Declined">
-
-    <button type="submit" class="btn btn-danger">
-        Decline Quote
-    </button>
-
-</form>
-
-                    <?php elseif ($quote["Status"] === "Pending"): ?>
-
-                        <div class="alert alert-warning">
-                            Waiting for the provider to respond.
-                        </div>
-
-                    <?php else: ?>
-
-                        <div class="alert alert-info">
-                            Quote <?php echo htmlspecialchars($quote["Status"]); ?>
-                        </div>
 
                     <?php endif; ?>
 
@@ -208,10 +224,11 @@ $quotes = $stmt->get_result();
 
         <?php endwhile; ?>
 
+
     <?php else: ?>
 
         <div class="alert alert-info">
-            You have not requested any quotes yet.
+            You currently have no quote requests.
         </div>
 
     <?php endif; ?>
